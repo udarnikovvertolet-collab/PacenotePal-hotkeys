@@ -105,7 +105,7 @@ class ACRally:
         # Do not play too many notes ahead of time
         previous_distances = []
 
-        p, stream = util.open_stream(next(iter(token_sounds.values()))[0])
+        stream = util.open_stream(next(iter(token_sounds.values()))[0])
 
         while len(self.notes_list) > 0 and not self.exit_all:
             while len(previous_distances) > 0 and previous_distances[0] < self.distance:
@@ -130,7 +130,6 @@ class ACRally:
                 time.sleep(0.05)
 
         stream.close()
-        p.terminate()
         print("Speak thread closed")
 
     def build_token_sounds(self):

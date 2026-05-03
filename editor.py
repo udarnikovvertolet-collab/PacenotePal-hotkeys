@@ -280,11 +280,10 @@ class Editor:
                         lbl["foreground"] = "red"
                 def play(t=playable_tokens):
                     def thread_func(t, token_sounds):
-                        p, stream = util.open_stream(next(iter(self.token_sounds.values()))[0])
+                        stream = util.open_stream(next(iter(self.token_sounds.values()))[0])
                         self.acrally.play_tokens(stream, t, token_sounds)
                         time.sleep(1)
                         stream.close()
-                        p.terminate()
                     threading.Thread(
                         target=thread_func,
                         args=(t, self.token_sounds), daemon=True
