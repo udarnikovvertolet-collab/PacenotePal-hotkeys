@@ -4,6 +4,7 @@ import sys
 import wave
 
 import pyaudio
+import winsound
 
 
 def resource_path(relative_path):
@@ -35,8 +36,11 @@ def play_audio(stream, audio_bytes):
 
 
 def play_beep():
+    winsound.Beep(750, 250)
+    return
     with open(str(resource_path("beep.wav")), "rb") as f:
         data = f.read()
+
         p, stream = open_stream(data)
         play_audio(stream, data)
         stream.close()
