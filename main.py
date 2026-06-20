@@ -2,14 +2,77 @@ import os
 import threading
 import time
 import tkinter as tk
+import tkinter.messagebox as mb
 from tkinter import ttk
 
+import keyboard
 from pycaw import pycaw
 import yaml
 
 import util
 from acrally import ACRally
 from editor import Editor
+
+
+# Maps Tkinter keysym names to the key names expected by the `keyboard` library.
+TK_TO_KEYBOARD = {
+    "Return": "enter",
+    "BackSpace": "backspace",
+    "Tab": "tab",
+    "Escape": "esc",
+    "Shift_L": "shift",
+    "Shift_R": "shift",
+    "Control_L": "ctrl",
+    "Control_R": "ctrl",
+    "Alt_L": "alt",
+    "Alt_R": "alt",
+    "space": "space",
+    "Left": "left",
+    "Right": "right",
+    "Up": "up",
+    "Down": "down",
+    "Delete": "delete",
+    "Insert": "insert",
+    "Home": "home",
+    "End": "end",
+    "Prior": "page up",
+    "Next": "page down",
+}
+
+
+def tk_to_keyboard(event):
+    """Converts a Tkinter key event into the key name format expected by the `keyboard` library."""
+    if event.keysym in TK_TO_KEYBOARD:
+        return TK_TO_KEYBOARD[event.keysym]
+
+    if event.char and event.char.isprintable():
+        return event.char.lower()
+
+    if event.keysym.startswith("F") and event.keysym[1:].isdigit():
+        return event.keysym.lower()
+
+    return event.keysym.lower()
+
+
+def bind_key_capture(entry, string_var, allow_clear=False):
+    """
+    Binds an Entry widget so that pressing any key fills it in with the
+    corresponding `keyboard`-library key name, instead of letting the user
+    type freely.
+
+    If `allow_clear` is True, pressing Backspace or Delete empties the field
+    instead of capturing them as a literal key name. This is meant for
+    optional hotkey fields, where an empty value means "no hotkey, this
+    feature is disabled" (as opposed to the required "Start button" field,
+    where an empty value would not make sense).
+    """
+    def on_key_release(event):
+        key_name = tk_to_keyboard(event)
+        if allow_clear and key_name in ("backspace", "delete"):
+            string_var.set("")
+        else:
+            string_var.set(key_name)
+    entry.bind("<KeyRelease>", on_key_release)
 
 
 class Main:
@@ -21,6 +84,8 @@ class Main:
     btn_start = None
     btn_stop = None
     config = None
+    hotkey_start_handle = None
+    hotkey_stop_handle = None
 
 
     def on_button_start(self):
@@ -44,6 +109,79 @@ class Main:
             self.acrally.exit()
         self.btn_start["state"] = "normal"
         self.btn_stop["state"] = "disabled"
+
+    def trigger_start_hotkey(self):
+        """
+        Invoked on the main thread (via root.after) when the global Start
+        hotkey is pressed. Mirrors a manual click on the Start button, but
+        only acts if the app is currently stopped, i.e. the Start button is
+        enabled - exactly like a real click would (a disabled button can't
+        be clicked, so a disabled state must also block the hotkey).
+        """
+        if str(self.btn_start["state"]) == "normal":
+            self.on_button_start()
+
+    def trigger_stop_hotkey(self):
+        """
+        Invoked on the main thread (via root.after) when the global Stop
+        hotkey is pressed. Mirrors a manual click on the Stop button, but
+        only acts if the app is currently running, i.e. the Stop button is
+        enabled - same reasoning as trigger_start_hotkey above.
+        """
+        if str(self.btn_stop["state"]) == "normal":
+            self.on_button_exit()
+
+    def register_hotkeys(self):
+        """
+        (Re-)registers the global Start/Stop hotkeys based on the current
+        contents of self.config. Safe to call repeatedly: any hotkey that
+        was registered by a previous call is removed first, so this same
+        method works both at startup and right after the user changes a
+        hotkey in Settings and clicks Save.
+
+        An empty hotkey string means "disabled" - no hook is registered for
+        that action in that case.
+        """
+        if self.hotkey_start_handle is not None:
+            try:
+                keyboard.remove_hotkey(self.hotkey_start_handle)
+            except KeyError:
+                pass
+            self.hotkey_start_handle = None
+
+        if self.hotkey_stop_handle is not None:
+            try:
+                keyboard.remove_hotkey(self.hotkey_stop_handle)
+            except KeyError:
+                pass
+            self.hotkey_stop_handle = None
+
+        hotkey_start = self.config.get("hotkey_start", "").strip()
+        hotkey_stop = self.config.get("hotkey_stop", "").strip()
+
+        if hotkey_start:
+            try:
+                self.hotkey_start_handle = keyboard.add_hotkey(
+                    hotkey_start, lambda: self.root.after(0, self.trigger_start_hotkey)
+                )
+            except Exception as e:
+                mb.showerror(
+                    "Invalid hotkey",
+                    f"Could not register the Start hotkey \"{hotkey_start}\":\n{e}\n\n"
+                    "This hotkey has been disabled. Please pick a different key in Settings."
+                )
+
+        if hotkey_stop:
+            try:
+                self.hotkey_stop_handle = keyboard.add_hotkey(
+                    hotkey_stop, lambda: self.root.after(0, self.trigger_stop_hotkey)
+                )
+            except Exception as e:
+                mb.showerror(
+                    "Invalid hotkey",
+                    f"Could not register the Stop hotkey \"{hotkey_stop}\":\n{e}\n\n"
+                    "This hotkey has been disabled. Please pick a different key in Settings."
+                )
 
     def on_button_distance(self):
         distance_window = tk.Toplevel(self.root)
@@ -85,7 +223,7 @@ class Main:
         settings_window = tk.Toplevel(self.root)
         settings_window.title("Settings")
         settings_window.iconbitmap(util.resource_path("icon.ico"))
-        settings_window.geometry("280x450")
+        settings_window.geometry("280x620")
 
         settings_frame = ttk.Frame(settings_window)
         settings_frame.pack(fill="x", padx=10, pady=10)
@@ -129,49 +267,31 @@ class Main:
         start_var = tk.StringVar(value=self.config.get("start_button", "space"))
         start_entry = ttk.Entry(settings_frame, textvariable=start_var)
         start_entry.grid(column=1, row=7, padx=5, pady=5)
-        def start_entry_key(e):
-            TK_TO_KEYBOARD = {
-                "Return": "enter",
-                "BackSpace": "backspace",
-                "Tab": "tab",
-                "Escape": "esc",
-                "Shift_L": "shift",
-                "Shift_R": "shift",
-                "Control_L": "ctrl",
-                "Control_R": "ctrl",
-                "Alt_L": "alt",
-                "Alt_R": "alt",
-                "space": "space",
-                "Left": "left",
-                "Right": "right",
-                "Up": "up",
-                "Down": "down",
-                "Delete": "delete",
-                "Insert": "insert",
-                "Home": "home",
-                "End": "end",
-                "Prior": "page up",
-                "Next": "page down",
-            }
-
-            def tk_to_keyboard(event):
-                if event.keysym in TK_TO_KEYBOARD:
-                    return TK_TO_KEYBOARD[event.keysym]
-
-                if event.char and event.char.isprintable():
-                    return event.char.lower()
-
-                if event.keysym.startswith("F") and event.keysym[1:].isdigit():
-                    return event.keysym.lower()
-
-                return event.keysym.lower()
-
-            start_var.set(tk_to_keyboard(e))
-        start_entry.bind("<KeyRelease>", start_entry_key)
+        bind_key_capture(start_entry, start_var)
 
         ttk.Label(settings_frame, text="Button to press at the start of the stage.\n"
                                        "See the README to use your handbrake instead."
                   ).grid(column=0, columnspan=2, row=8, sticky="W")
+
+        ttk.Label(settings_frame, text="Hotkey: Start").grid(column=0, row=9, padx=5, pady=5)
+        hotkey_start_var = tk.StringVar(value=self.config.get("hotkey_start", ""))
+        hotkey_start_entry = ttk.Entry(settings_frame, textvariable=hotkey_start_var)
+        hotkey_start_entry.grid(column=1, row=9, padx=5, pady=5)
+        bind_key_capture(hotkey_start_entry, hotkey_start_var, allow_clear=True)
+
+        ttk.Label(settings_frame, text="Hotkey: Stop").grid(column=0, row=10, padx=5, pady=5)
+        hotkey_stop_var = tk.StringVar(value=self.config.get("hotkey_stop", ""))
+        hotkey_stop_entry = ttk.Entry(settings_frame, textvariable=hotkey_stop_var)
+        hotkey_stop_entry.grid(column=1, row=10, padx=5, pady=5)
+        bind_key_capture(hotkey_stop_entry, hotkey_stop_var, allow_clear=True)
+
+        ttk.Label(settings_frame, text="Global hotkeys for the Start/Stop buttons -\n"
+                                       "they work even while Assetto Corsa has focus,\n"
+                                       "so you don't need to alt-tab. Leave a field\n"
+                                       "empty to disable it; press Backspace/Delete\n"
+                                       "in the field to clear it. Start and Stop\n"
+                                       "must use two different keys."
+                  ).grid(column=0, columnspan=2, row=11, sticky="W")
 
         def get_volume():
             current_pid = os.getpid()
@@ -197,23 +317,37 @@ class Main:
                     return True
             return False
 
-        ttk.Label(settings_frame, text="Volume").grid(column=0, row=9, padx=5, pady=5)
+        ttk.Label(settings_frame, text="Volume").grid(column=0, row=12, padx=5, pady=5)
         volume_var = tk.DoubleVar(value=get_volume() * 100)
         volume_scale = ttk.Scale(settings_frame, variable=volume_var, from_=0, to=100, command=set_volume)
         volume_scale.bind("<ButtonRelease>", lambda e: util.play_beep())
-        volume_scale.grid(column=1, row=9, padx=5, pady=5)
+        volume_scale.grid(column=1, row=12, padx=5, pady=5)
 
         def save():
+            new_hotkey_start = hotkey_start_var.get().strip()
+            new_hotkey_stop = hotkey_stop_var.get().strip()
+
+            if new_hotkey_start and new_hotkey_start == new_hotkey_stop:
+                mb.showerror(
+                    "Conflicting hotkeys",
+                    "The Start and Stop hotkeys cannot be the same key.\n"
+                    "Please choose two different keys."
+                )
+                return
+
             self.config["voice"] = voice_var.get()
             self.config["start_button"] = start_var.get()
             self.config["call_distance"] = call_distance_var.get()
             self.config["calls_ahead"] = calls_ahead_var.get()
             self.config["call_speed_multiplier"] = call_speed_multiplier_var.get()
+            self.config["hotkey_start"] = new_hotkey_start
+            self.config["hotkey_stop"] = new_hotkey_stop
             yaml.dump(self.config, open("config.yml", "w", encoding="utf-8"))
+            self.register_hotkeys()
             settings_window.withdraw()
 
         save_btn = ttk.Button(settings_frame, text="Save", command=save)
-        save_btn.grid(column=0, columnspan=2, row=10, padx=5, pady=5)
+        save_btn.grid(column=0, columnspan=2, row=13, padx=5, pady=5)
 
     def __init__(self):
         self.config = yaml.safe_load(open("config.yml", encoding="utf-8"))
@@ -256,6 +390,8 @@ class Main:
 
         # Play nothing to start audio session
         threading.Thread(target=util.initialise_audio, daemon=True).start()
+
+        self.register_hotkeys()
 
         root.mainloop()
 
