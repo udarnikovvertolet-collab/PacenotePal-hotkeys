@@ -102,6 +102,7 @@ class Main:
         self.acrally.start()
         self.btn_start["state"] = "disabled"
         self.btn_stop["state"] = "normal"
+        threading.Thread(target=util.play_audio_file, args=(util.resource_path("start.wav"),), daemon=True).start()
 
 
     def on_button_exit(self):
@@ -109,6 +110,7 @@ class Main:
             self.acrally.exit()
         self.btn_start["state"] = "normal"
         self.btn_stop["state"] = "disabled"
+        threading.Thread(target=util.play_audio_file, args=(util.resource_path("stop.wav"),), daemon=True).start()
 
     def trigger_start_hotkey(self):
         """

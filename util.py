@@ -32,14 +32,36 @@ def play_audio(stream, audio_bytes):
         stream.write(wf.readframes(wf.getnframes()))
 
 
-def play_beep():
-    with open(str(resource_path("beep.wav")), "rb") as f:
-        data = f.read()
+def play_audio_file(path):
+    """
+    Plays a WAV file on the default output device and blocks until playback
+    finishes. Used for short confirmation sounds (e.g. Start/Stop feedback).
+
+    This is feedback only - a missing or unreadable/unsupported file must
+    never raise and never block the caller indefinitely, so any failure to
+    read or parse the file is swallowed silently and simply results in no
+    sound being played.
+    """
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return
+
+    try:
+        with wave.open(io.BytesIO(data), "rb") as wf:
+            duration = wf.getnframes() / float(wf.getframerate())
 
         stream = open_stream(data)
         play_audio(stream, data)
-        time.sleep(0.5)
+        time.sleep(duration + 0.05)
         stream.close()
+    except Exception:
+        pass
+
+
+def play_beep():
+    play_audio_file(str(resource_path("beep.wav")))
 
 
 def initialise_audio():

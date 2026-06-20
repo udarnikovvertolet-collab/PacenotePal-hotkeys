@@ -21,7 +21,9 @@ exe = EXE(
     a.scripts,
     a.binaries + [
         ('icon.ico', 'icon.ico', 'DATA'),
-        ('beep.wav', 'beep.wav', 'DATA')
+        ('beep.wav', 'beep.wav', 'DATA'),
+        ('start.wav', 'start.wav', 'DATA'),
+        ('stop.wav', 'stop.wav', 'DATA')
     ],
     a.datas,
     [],
