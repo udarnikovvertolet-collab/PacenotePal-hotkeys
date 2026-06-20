@@ -71,7 +71,8 @@ class ACRally:
         while (not keyboard.is_pressed(self.start_button) and not handbrake_pressed) and not self.exit_all:
             time.sleep(0.05)
 
-        util.play_beep()
+        if not self.exit_all:
+            util.play_beep()
 
         while not self.exit_all:
             sm = asm.read_shared_memory()
